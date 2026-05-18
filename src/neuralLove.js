@@ -7,6 +7,18 @@ function authHeaders(apiKey) {
   };
 }
 
+function errorMessage(data, res) {
+  return (
+    data?.detail ||
+    data?.message ||
+    data?.error ||
+    data?.title ||
+    data?.raw ||
+    res.statusText ||
+    String(res.status)
+  );
+}
+
 async function readJson(res) {
   const body = await res.text();
   let data;
@@ -16,9 +28,7 @@ async function readJson(res) {
     data = { raw: body };
   }
   if (!res.ok) {
-    const msg =
-      data?.message || data?.error || data?.raw || res.statusText || String(res.status);
-    throw new Error(`neural.love ${res.status}: ${msg}`);
+    throw new Error(`neural.love ${res.status}: ${errorMessage(data, res)}`);
   }
   return data;
 }
@@ -62,25 +72,43 @@ export async function uploadImage(apiKey, buffer, mimeType) {
 }
 
 export async function createImageOrder(apiKey, s3Url, parameters) {
-  const data = await readJson(
-    await fetch(`${API_BASE}/images/process`, {
-      method: "POST",
-      headers: {
-        ...authHeaders(apiKey),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        files: [s3Url],
-        parameters,
-      }),
-    })
-  );
+  const payload = JSON.stringify({
+    files: [s3Url],
+    parameters,
+  });
+  const headers = {
+    ...authHeaders(apiKey),
+    "Content-Type": "application/json",
+  };
+  // After S3 upload the file is scanned; API returns 487 until ready.
+  const retryDelaysMs = [5000, 10000, 15000, 20000, 25000, 30000, 30000];
 
-  const orderId = data.orderId || data.id || data.order?.id;
-  if (!orderId) {
-    throw new Error("No orderId in neural.love response");
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(retryDelaysMs[attempt - 1]);
+    }
+
+    const res = await fetch(`${API_BASE}/images/process`, {
+      method: "POST",
+      headers,
+      body: payload,
+    });
+
+    if (res.status === 487) {
+      continue;
+    }
+
+    const data = await readJson(res);
+    const orderId = data.orderId || data.id || data.order?.id;
+    if (!orderId) {
+      throw new Error("No orderId in neural.love response");
+    }
+    return orderId;
   }
-  return orderId;
+
+  throw new Error(
+    "Файл ещё проверяется на neural.love. Подождите минуту и отправьте фото снова."
+  );
 }
 
 function pickResultUrls(order) {
