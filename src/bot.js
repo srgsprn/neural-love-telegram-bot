@@ -1,5 +1,5 @@
 import { Telegraf } from "telegraf";
-import { helpText, parseProcessingParameters } from "./parseIntent.js";
+import { helpText, parseProcessingParameters, welcomeText } from "./parseIntent.js";
 import { processImage } from "./neuralLove.js";
 
 const pending = new Map();
@@ -80,9 +80,7 @@ export function createBot({ token, neuralApiKey, allowedUserIds = [] }) {
   });
 
   bot.start(async (ctx) => {
-    await ctx.reply(
-      "Привет! Пришлите фото и опишите, что с ним сделать.\n\n" + helpText()
-    );
+    await ctx.reply(welcomeText());
   });
 
   bot.command("help", async (ctx) => {
