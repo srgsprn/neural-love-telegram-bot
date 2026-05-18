@@ -27,7 +27,7 @@ async function downloadTelegramFile(ctx, fileId) {
   return { buffer, mimeType };
 }
 
-async function runProcessing(ctx, { buffer, mimeType, instruction }) {
+async function runProcessing(ctx, apiKey, { buffer, mimeType, instruction }) {
   const { parameters, summary } = parseProcessingParameters(instruction);
   const statusMsg = await ctx.reply(
     `Обрабатываю: ${summary}\nОбычно это 1–3 минуты…`
@@ -35,7 +35,7 @@ async function runProcessing(ctx, { buffer, mimeType, instruction }) {
 
   try {
     const { orderId, urls } = await processImage(
-      ctx.neuralApiKey,
+      apiKey,
       buffer,
       mimeType,
       parameters
@@ -67,7 +67,7 @@ async function runProcessing(ctx, { buffer, mimeType, instruction }) {
 
 export function createBot({ token, neuralApiKey, allowedUserIds = [] }) {
   const bot = new Telegraf(token);
-  bot.neuralApiKey = neuralApiKey;
+  const processPhoto = (ctx, opts) => runProcessing(ctx, neuralApiKey, opts);
 
   bot.use(async (ctx, next) => {
     const userId = ctx.from?.id;
@@ -94,7 +94,7 @@ export function createBot({ token, neuralApiKey, allowedUserIds = [] }) {
 
     if (instruction) {
       const { buffer, mimeType } = await downloadTelegramFile(ctx, best.file_id);
-      await runProcessing(ctx, { buffer, mimeType, instruction });
+      await processPhoto(ctx, { buffer, mimeType, instruction });
       return;
     }
 
@@ -117,7 +117,7 @@ export function createBot({ token, neuralApiKey, allowedUserIds = [] }) {
     const { buffer, mimeType } = await downloadTelegramFile(ctx, doc.file_id);
 
     if (instruction) {
-      await runProcessing(ctx, { buffer, mimeType, instruction });
+      await processPhoto(ctx, { buffer, mimeType, instruction });
       return;
     }
 
@@ -146,7 +146,7 @@ export function createBot({ token, neuralApiKey, allowedUserIds = [] }) {
 
     pending.delete(ctx.from.id);
     const { buffer, mimeType } = await downloadTelegramFile(ctx, entry.fileId);
-    await runProcessing(ctx, { buffer, mimeType, instruction: ctx.message.text });
+    await processPhoto(ctx, { buffer, mimeType, instruction: ctx.message.text });
   });
 
   return bot;
