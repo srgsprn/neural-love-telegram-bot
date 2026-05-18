@@ -1,0 +1,16 @@
+[Unit]
+Description=Telegram bot for neural.love image processing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/neural-love-telegram-bot
+EnvironmentFile=/root/neural-love-telegram-bot/.env
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

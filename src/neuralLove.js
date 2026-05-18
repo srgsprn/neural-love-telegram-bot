@@ -1,0 +1,160 @@
+const API_BASE = "https://api.neural.love/v1";
+
+function authHeaders(apiKey) {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
+}
+
+async function readJson(res) {
+  const body = await res.text();
+  let data;
+  try {
+    data = body ? JSON.parse(body) : {};
+  } catch {
+    data = { raw: body };
+  }
+  if (!res.ok) {
+    const msg =
+      data?.message || data?.error || data?.raw || res.statusText || String(res.status);
+    throw new Error(`neural.love ${res.status}: ${msg}`);
+  }
+  return data;
+}
+
+function extensionFromMime(mime) {
+  const map = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+  };
+  return map[mime] || "jpg";
+}
+
+export async function uploadImage(apiKey, buffer, mimeType) {
+  const contentType = mimeType || "image/jpeg";
+  const extension = extensionFromMime(contentType);
+
+  const presign = await readJson(
+    await fetch(`${API_BASE}/upload`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(apiKey),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ extension, contentType }),
+    })
+  );
+
+  const putRes = await fetch(presign.url, {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body: buffer,
+  });
+  if (!putRes.ok) {
+    throw new Error(`Upload to storage failed: ${putRes.status}`);
+  }
+
+  return presign.s3Url;
+}
+
+export async function createImageOrder(apiKey, s3Url, parameters) {
+  const data = await readJson(
+    await fetch(`${API_BASE}/images/process`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(apiKey),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        files: [s3Url],
+        parameters,
+      }),
+    })
+  );
+
+  const orderId = data.orderId || data.id || data.order?.id;
+  if (!orderId) {
+    throw new Error("No orderId in neural.love response");
+  }
+  return orderId;
+}
+
+function pickResultUrls(order) {
+  const urls = [];
+  const files = order?.files || order?.result?.files || [];
+  for (const file of files) {
+    const url =
+      file?.url ||
+      file?.downloadUrl ||
+      file?.resultUrl ||
+      file?.outputUrl ||
+      (typeof file === "string" ? file : null);
+    if (url && /^https?:\/\//i.test(url)) urls.push(url);
+  }
+  if (order?.resultUrl && /^https?:\/\//i.test(order.resultUrl)) {
+    urls.push(order.resultUrl);
+  }
+  return [...new Set(urls)];
+}
+
+export async function waitForOrder(apiKey, orderId, { onProgress } = {}) {
+  const delays = [5000, 10000, 15000, 20000, 25000, 30000, 30000, 30000];
+  let attempt = 0;
+
+  for (const delay of delays) {
+    await sleep(delay);
+    attempt += 1;
+
+    const order = await readJson(
+      await fetch(`${API_BASE}/images/orders/${orderId}`, {
+        headers: authHeaders(apiKey),
+      })
+    );
+
+    const ready =
+      order?.status?.isReady === true ||
+      order?.isReady === true ||
+      order?.status === "ready" ||
+      order?.status === "completed";
+
+    const failed =
+      order?.status?.isFailed === true ||
+      order?.status === "failed" ||
+      order?.status === "error";
+
+    if (onProgress) {
+      await onProgress({ attempt, ready, failed, order });
+    }
+
+    if (failed) {
+      const reason =
+        order?.status?.message || order?.error || "обработка завершилась с ошибкой";
+      throw new Error(reason);
+    }
+
+    const urls = pickResultUrls(order);
+    if (ready && urls.length > 0) {
+      return { order, urls };
+    }
+    if (ready && urls.length === 0) {
+      throw new Error("Заказ готов, но ссылка на файл не найдена в ответе API");
+    }
+  }
+
+  throw new Error("Таймаут ожидания результата (попробуйте ещё раз позже)");
+}
+
+export async function processImage(apiKey, buffer, mimeType, parameters) {
+  const s3Url = await uploadImage(apiKey, buffer, mimeType);
+  const orderId = await createImageOrder(apiKey, s3Url, parameters);
+  const { urls } = await waitForOrder(apiKey, orderId);
+  return { orderId, urls };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
