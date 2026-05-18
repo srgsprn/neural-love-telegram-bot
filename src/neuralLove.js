@@ -1,4 +1,5 @@
 const API_BASE = "https://api.neural.love/v1";
+const DEFAULT_PROCESSING_MODEL = "default";
 
 function authHeaders(apiKey) {
   return {
@@ -19,6 +20,49 @@ function errorMessage(data, res) {
   );
 }
 
+function formatApiError(status, data, res) {
+  const detail = errorMessage(data, res);
+  if (status === 402) {
+    return "Недостаточно кредитов на neural.love. Пополните баланс на сайте сервиса.";
+  }
+  if (status === 487) {
+    return "Файл ещё проверяется на neural.love. Подождите минуту и отправьте фото снова.";
+  }
+  if (status === 439) {
+    return "Слишком много заказов в обработке. Подождите и попробуйте снова.";
+  }
+  if (status === 401) {
+    return "Ошибка авторизации API neural.love. Проверьте ключ на сервере.";
+  }
+  return detail;
+}
+
+/** API expects `model` inside some operation objects (not at parameters root). */
+export function normalizeParameters(parameters) {
+  const params = { ...parameters };
+
+  if (params.quality_enhance && typeof params.quality_enhance === "object") {
+    params.quality_enhance = {
+      model: DEFAULT_PROCESSING_MODEL,
+      ...params.quality_enhance,
+    };
+  }
+
+  if (params.image_colorization !== undefined) {
+    const base =
+      typeof params.image_colorization === "object" && params.image_colorization
+        ? params.image_colorization
+        : {};
+    params.image_colorization = {
+      model: DEFAULT_PROCESSING_MODEL,
+      hd_quality: false,
+      ...base,
+    };
+  }
+
+  return params;
+}
+
 async function readJson(res) {
   const body = await res.text();
   let data;
@@ -28,7 +72,9 @@ async function readJson(res) {
     data = { raw: body };
   }
   if (!res.ok) {
-    throw new Error(`neural.love ${res.status}: ${errorMessage(data, res)}`);
+    throw new Error(
+      `neural.love ${res.status}: ${formatApiError(res.status, data, res)}`
+    );
   }
   return data;
 }
@@ -72,9 +118,10 @@ export async function uploadImage(apiKey, buffer, mimeType) {
 }
 
 export async function createImageOrder(apiKey, s3Url, parameters) {
+  const normalized = normalizeParameters(parameters);
   const payload = JSON.stringify({
     files: [s3Url],
-    parameters,
+    parameters: normalized,
   });
   const headers = {
     ...authHeaders(apiKey),
@@ -106,9 +153,7 @@ export async function createImageOrder(apiKey, s3Url, parameters) {
     return orderId;
   }
 
-  throw new Error(
-    "Файл ещё проверяется на neural.love. Подождите минуту и отправьте фото снова."
-  );
+  throw new Error(formatApiError(487, {}, { status: 487, statusText: "" }));
 }
 
 function pickResultUrls(order) {
