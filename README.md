@@ -8,6 +8,8 @@
 
 > [github.com/srgsprn/neural-love-telegram-bot](https://github.com/srgsprn/neural-love-telegram-bot)
 
+> **Статус:** код и деплой готовы — для полноценной работы осталось подключить **платную подписку** на [neural.love](https://neural.love).
+
 ---
 
 ## О проекте
@@ -21,6 +23,7 @@
 | **Задача** | AI-обработка фото прямо в Telegram, без веб-интерфейса |
 | **Стек** | Node.js, Telegraf, neural.love API |
 | **Деплой** | VPS (systemd) |
+| **Статус** | Готов к запуску — нужна платная подписка neural.love |
 
 ---
 
